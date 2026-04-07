@@ -1,7 +1,6 @@
 r"""
 math_engine/qubo_mapper.py
-Translates continuous financial moments and capital constraints into a discrete QUBO.
-Applies penalty multipliers (\lambda) for budget constraints.
+Translates continuous financial moments and capital constraints into a discrete QUBO using capital buckets.
 """
 
 from qiskit_optimization import QuadraticProgram
@@ -19,47 +18,37 @@ def construct_portfolio_qubo(
     bit_depth: int = 3,
     penalty_multiplier: float = 1e5
 ) -> Tuple[QuadraticProgram, QuadraticProgram]:
-    r"""
-    Constructs the Discrete Markowitz problem and converts it to a QUBO.
-    """
-    qp = QuadraticProgram(name="Discrete_Markowitz")
     
+    qp = QuadraticProgram(name="Discrete_Markowitz")
     max_units = (2 ** bit_depth) - 1
     
-    # 1. Variable Definition
+    # 1. Variable Definition (x_i = number of capital buckets)
     for ticker in tickers:
         qp.integer_var(name=ticker, lowerbound=0, upperbound=max_units)
         
     # 2. Objective Function Construction
+    # Weight w_i = x_i / max_units
     linear_terms = {
-        tickers[i]: -(mu[i] * prices[i] / budget) for i in range(len(tickers))
+        tickers[i]: -(mu[i] / max_units) for i in range(len(tickers))
     }
     
     quadratic_terms = {}
     for i in range(len(tickers)):
         for j in range(len(tickers)):
-            coef = risk_aversion * (prices[i] * prices[j] / (budget ** 2)) * sigma[i, j]
+            coef = risk_aversion * sigma[i, j] / (max_units ** 2)
             quadratic_terms[(tickers[i], tickers[j])] = coef
             
     qp.minimize(linear=linear_terms, quadratic=quadratic_terms)
     
-    # 3. Capital Budget Constraint (DYNAMIC SCALING FIX)
-    # We dynamically scale the budget down to a maximum of ~1000 units.
-    # This restricts the Qiskit slack variable to ~10 qubits, preventing OOM errors 
-    # on the classical exact eigensolver while maintaining constraint fidelity.
-    scale_factor = min(1.0, 1000.0 / budget) if budget > 0 else 1.0
-    
-    integer_budget = int(np.round(budget * scale_factor))
-    
-    # Ensure prices scale down proportionally, but never drop to 0 (which would make them "free")
-    integer_prices = {
-        tickers[i]: max(1, int(np.round(prices[i] * scale_factor))) for i in range(len(tickers))
-    }
-    
+    # 3. Capital Budget Constraint
+    # The sum of all assigned buckets must be <= max_units.
+    # Note: If you want to force the portfolio to be 100% invested (no cash), 
+    # change sense="<=" to sense="=="
+    bucket_dict = {ticker: 1 for ticker in tickers}
     qp.linear_constraint(
-        linear=integer_prices,
-        sense="<=",
-        rhs=integer_budget,
+        linear=bucket_dict,
+        sense="<=", 
+        rhs=max_units,
         name="capital_budget"
     )
     
