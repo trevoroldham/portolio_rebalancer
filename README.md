@@ -11,13 +11,11 @@ The objective of this project is to provide a deterministic, high-fidelity rebal
 ### The Pipeline
 1.  **Ingestion:** Pulls real-time and historical market data via `yfinance`.
 2.  **Culling:** Automatically reduces the asset universe based on the annualized Sharpe Ratio to prevent the $2^N$ exponential memory explosion of the exact solver.
-3.  **QUBO Mapping:** Translates the Markowitz mean-variance objective into a discrete integer problem:
-    $$\min_{x} \left( q \cdot \frac{(x^T p)^T \Sigma (x^T p)}{B^2} - \frac{\mu^T (x^T p)}{B} \right)$$
-    *Where $x$ is the integer share vector, $p$ is the price vector, and $B$ is the total budget.*
-4.  **Exact Solving:** Algebraic computation of the global minimum using the `NumPyMinimumEigensolver`.
-5.  **Threshold Rebalancing:** Filters recommended trades based on a 5% asset drift threshold to minimize slippage and tax liability.
-
----
+3.  **QUBO Mapping:** Translates the Markowitz mean-variance objective into a discrete **Capital Bucket** problem:
+    $$\min_{x} \left( q \cdot \frac{x^T \Sigma x}{K^2} - \frac{\mu^T x}{K} \right)$$
+    *Where $x$ is a vector of discrete capital units (buckets), $K$ is the maximum units available ($2^{bit\_depth} - 1$), and $q$ is the risk aversion.*
+4.  **Exact Solving:** Algebraic computation of the global minimum using the `NumPyMinimumEigensolver`. The solver assigns $K$ total units across the asset universe.
+5.  **Translation & Rebalancing:** Converts the optimal "buckets" back into physical share counts based on current market prices. It then compares this to the `PortfolioState` and generates `TradeRecommendations` for any assets exceeding the drift threshold.
 
 ## Tech Stack
 * **Frontend:** Streamlit (Reactive State Management)
@@ -36,8 +34,8 @@ The objective of this project is to provide a deterministic, high-fidelity rebal
 - [x] Validated the end-to-end backend pipeline via `main.py`.
 
 ### Phase 2: UI & UX
-- [ ] Implement the Streamlit dashboard for "Current vs. Target" visualization.
-- [ ] Build interactive parameter tuning (Risk Aversion, Bit-Depth, Drift Threshold).
+- [x] Implement the Streamlit dashboard for "Current vs. Target" trade suggestions.
+- [x] Build interactive parameter tuning (Risk Aversion, Bit-Depth, Drift Threshold).
 - [ ] Add performance backtesting visuals for the "Optimal" suggested state.
 
 ### Phase 3: Advanced Logic
@@ -61,9 +59,9 @@ The objective of this project is to provide a deterministic, high-fidelity rebal
     ```
 3.  Run the backend test:
     ```bash
-    python main.py
+    python3 main.py
     ```
-4.  Launch the web app (Coming Soon):
+4.  Launch the web app:
     ```bash
     streamlit run app.py
     ```
