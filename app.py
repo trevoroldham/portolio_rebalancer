@@ -15,6 +15,7 @@ from math_engine.qubo_mapper import construct_portfolio_qubo
 from math_engine.exact_solver import compute_optimal_allocation
 from logic.rebalancer import generate_trade_actions
 from ui.widgets import render_portfolio_input, render_optimization_params
+from ui.dashboards import render_weight_comparison
 
 # Configure the Streamlit page
 st.set_page_config(
@@ -112,7 +113,10 @@ def main():
                 "optimal_allocation": optimal_allocation,
                 "trades": trades,
                 "solve_time": time.time() - start_time,
-                "qubits": qubo.get_num_vars()
+                "qubits": qubo.get_num_vars(),
+                "mu": mu,                         
+                "sigma": sigma,                  
+                "tickers": ordered_tickers
             }
 
     # --- 3. Results Dashboard ---
@@ -121,36 +125,47 @@ def main():
         state = results["current_state"]
         trades = results["trades"]
         
+        # Hydrate current prices for the dashboard
+        current_prices = {p.symbol: p.price for p in state.positions.values()}
+        for t in trades:
+            if t.symbol not in current_prices:
+                current_prices[t.symbol] = t.price
+        
+        # 1. Visual Verification (Pie Charts)
+        render_weight_comparison(state, results["optimal_allocation"], current_prices)
+        st.divider()
+        
+        # 2. Trade Actions
         st.subheader("📊 Rebalancing Actions")
         st.caption(f"Solved exactly across {results['qubits']} qubits in {results['solve_time']:.2f} seconds.")
         
-        # Macro Metrics
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Equity", f"${state.total_equity:,.2f}")
-        m2.metric("Uninvested Cash", f"${state.cash_balance:,.2f}")
-        m3.metric("Trade Actions Required", len(trades))
-        
         if not trades:
-            st.success(f"No trades required. All assets are within the {drift_threshold}% drift threshold.")
+            st.success("No trades required. All assets are within the drift threshold.")
         else:
-            # Format trades for display
-            trade_data = []
-            for t in trades:
-                trade_data.append({
-                    "Action": t.action,
-                    "Asset": t.symbol,
-                    "Current Shares": t.current_shares,
-                    "Target Shares": t.target_shares,
-                    "Delta": f"{'+' if t.share_delta > 0 else ''}{t.share_delta}",
-                    "Est. Value ($)": round(t.trade_value, 2),
-                    "Drift (%)": round(t.drift_percentage, 2)
-                })
+            trade_data = [{
+                "Action": t.action, "Asset": t.symbol, 
+                "Current Shares": t.current_shares, "Target Shares": t.target_shares,
+                "Delta": f"{'+' if t.share_delta > 0 else ''}{t.share_delta}",
+                "Est. Value ($)": round(t.trade_value, 2), "Drift (%)": round(t.drift_percentage, 2)
+            } for t in trades]
+            st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
+            
+        # 3. Mathematical Verification (The X-Ray)
+        with st.expander("🔍 Math X-Ray: Why did the solver choose this?"):
+            st.markdown("If a stock was sold off, check its Expected Return below. The solver ruthlessly cuts assets with negative projections or excessively high covariance.")
+            
+            x_col1, x_col2 = st.columns(2)
+            with x_col1:
+                st.markdown("**Expected Annualized Returns ($\mu$)**")
+                # Convert to a single-column DataFrame to unlock the .style API
+                mu_df = pd.DataFrame(results["mu"], index=results["tickers"], columns=["Return"])
+                st.dataframe(mu_df.style.format("{:.2%}"), use_container_width=True)
                 
-            st.dataframe(
-                pd.DataFrame(trade_data),
-                use_container_width=True,
-                hide_index=True
-            )
+            with x_col2:
+                st.markdown("**Covariance Matrix ($\Sigma$)**")
+                # Convert the sigma numpy matrix to a pandas DataFrame
+                sigma_df = pd.DataFrame(results["sigma"], index=results["tickers"], columns=results["tickers"])
+                st.dataframe(sigma_df.style.format("{:.4f}"), use_container_width=True)
 
 if __name__ == "__main__":
     main()
