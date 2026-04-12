@@ -9,7 +9,6 @@ __pycache__/
 venv/
 env/
 
-# Streamlit & Local Config
-.streamlit/config.toml
+
 
 scripts/
